@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.9.5
+  * Fixes a bug in sending the fields to the v3 Deals endpoint [#145](https://github.com/singer-io/tap-hubspot/pull/145)
+
+## 2.9.4
+  * Reverts 142 [#144](https://github.com/singer-io/tap-hubspot/pull/144)
+
+## 2.9.3
+  * Add support for property_versions [#142](https://github.com/singer-io/tap-hubspot/pull/142)
+
+## 2.9.2
+  * Change `POST` to V3 Deals to use one non-standard field instead of all fields we want [#139](https://github.com/singer-io/tap-hubspot/pull/139)
+    * See the pull request for a more detailed explaination
+
+## 2.9.1
+  * Add retry logic to V3 calls [#136](https://github.com/singer-io/tap-hubspot/pull/136)
+
+## 2.9.0
+  * Add fields to Deals stream - `hs_date_entered_*` and `hs_date_exited_*` [#133](https://github.com/singer-io/tap-hubspot/pull/133)
+
+## 2.8.1
+  * Reverts `v2.8.0` back to `v.2.7.0`
+
+## 2.8.0
+  * Add fields to Deals stream - `hs_date_entered_*` and `hs_date_exited_*` [#124](https://github.com/singer-io/tap-hubspot/pull/124)
+
 ## 2.7.0
   * Fields nested under `properties` are copied to top level and prepended with `property_` [#107](https://github.com/singer-io/tap-hubspot/pull/107)
 

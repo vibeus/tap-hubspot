@@ -3,7 +3,7 @@
 from setuptools import setup
 
 setup(name='tap-hubspot',
-      version='2.7.0',
+      version='2.9.5',
       description='Singer.io tap for extracting data from the HubSpot API',
       author='Stitch',
       url='http://singer.io',
@@ -15,8 +15,13 @@ setup(name='tap-hubspot',
           'requests==2.20.0',
           'backoff==1.3.2',
           'requests_mock==1.3.0',
-          'nose'
       ],
+      extras_require= {
+          'dev': [
+              'pylint==2.5.3',
+              'nose==1.3.7',
+          ]
+      },
       entry_points='''
           [console_scripts]
           tap-hubspot=tap_hubspot:main

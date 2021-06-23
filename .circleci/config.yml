@@ -1,34 +1,40 @@
-version: 2
+version: 2.1
+orbs:
+  slack: circleci/slack@3.4.2
+
 jobs:
   build:
     docker:
-      - image: 218546966473.dkr.ecr.us-east-1.amazonaws.com/circle-ci:tap-tester
+      - image: 218546966473.dkr.ecr.us-east-1.amazonaws.com/circle-ci:tap-tester-v4
     steps:
       - checkout
       - run:
           name: 'Setup virtual env'
           command: |
-            virtualenv -p python3 ~/.virtualenvs/tap-hubspot
-            source ~/.virtualenvs/tap-hubspot/bin/activate
-            pip install .
-            pip install pylint
+            python3 -m venv /usr/local/share/virtualenvs/tap-hubspot/
+            source /usr/local/share/virtualenvs/tap-hubspot/bin/activate
+            pip install -U 'pip<19.2' 'setuptools<51.0.0'
+            pip install .[dev]
+      - run:
+          name: 'pylint'
+          command: |
+            source /usr/local/share/virtualenvs/tap-hubspot/bin/activate
             pylint tap_hubspot -d C,R,W
       - run:
           name: 'Unit Tests'
           command: |
-            source ~/.virtualenvs/tap-hubspot/bin/activate
-            pip install nose
+            source /usr/local/share/virtualenvs/tap-hubspot/bin/activate
             nosetests tap_hubspot/tests
       - run:
           name: 'JSON Validator'
           command: |
             source /usr/local/share/virtualenvs/tap-tester/bin/activate
-            stitch-validate-json ~/.virtualenvs/tap-hubspot/lib/python3.5/site-packages/tap_hubspot/schemas/*.json
+            stitch-validate-json tap_hubspot/schemas/*.json
       - add_ssh_keys
       - run:
           name: 'Integration Tests'
           command: |
-            aws s3 cp s3://com-stitchdata-dev-deployment-assets/environments/tap-tester/sandbox dev_env.sh
+            aws s3 cp s3://com-stitchdata-dev-deployment-assets/environments/tap-tester/tap_tester_sandbox dev_env.sh
             source dev_env.sh
             source /usr/local/share/virtualenvs/tap-tester/bin/activate
             run-test --tap=tap-hubspot \
@@ -38,18 +44,23 @@ jobs:
                      --password=$SANDBOX_PASSWORD \
                      --client-id=50 \
                      tests
+      - slack/notify-on-failure:
+          only_for_branches: master
+
 workflows:
   version: 2
   commit:
     jobs:
-      - build
+      - build:
+          context: circleci-user
   build_daily:
     triggers:
       - schedule:
-          cron: "0 0 * * *"
+          cron: "0 6 * * *"
           filters:
             branches:
               only:
                 - master
     jobs:
-      - build
+      - build:
+          context: circleci-user
