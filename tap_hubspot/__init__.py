@@ -97,6 +97,23 @@ ENDPOINTS = {
     "owners":               "/owners/v2/owners",
 }
 
+def replace_na(obj):
+    """
+    Treat N/A as None so that we don't need to add string variant to numbers.
+    Picked from https://github.com/singer-io/tap-hubspot/pull/86, without the mess of command line args.
+    """
+    if isinstance(obj, dict):
+        copy = {}
+        for k, v in obj.items():
+            copy[k] = replace_na(v)
+        return copy
+    elif isinstance(obj, list):
+        return [replace_na(x) for x in obj]
+    elif isinstance(obj, str):
+        return None if obj.lower() == "n/a" else obj
+    else:
+        return obj
+
 def get_start(state, tap_stream_id, bookmark_key):
     current_bookmark = singer.get_bookmark(state, tap_stream_id, bookmark_key)
     if current_bookmark is None:
@@ -140,8 +157,9 @@ def get_field_type_schema(field_type):
     elif field_type == "number":
         # A value like 'N/A' can be returned for this type,
         # so we have to let this be a string sometimes
-        return {"type": ["null", "number", "string"]}
-
+        # JW: it won't be a problem after replace_na, so remove string here.
+        # return {"type": ["null", "number", "string"]}
+        return {"type": ["null", "number"]}
     else:
         return {"type": ["null", "string"]}
 
@@ -320,6 +338,7 @@ def request(url, params=None):
 # }
 
 def lift_properties_and_versions(record):
+    record = replace_na(record)
     for key, value in record.get('properties', {}).items():
         computed_key = "property_{}".format(key)
         versions = value.get('versions')
