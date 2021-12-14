@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "submittedAt": {
+      "type": ["null", "string"],
+      "format": "date-time"
+    },
+    "formGuid": {
+      "type": ["null", "string"]
+    },
+    "values": {
+      "type": ["null", "array"],
+      "items": {
+          "type": ["null", "object"],
+          "properties": {
+            "name": {
+              "type": ["null", "string"]
+            },
+            "value": {
+              "type": ["null", "string"]
+            }
+          }
+      }
+    }
+  }
+}
