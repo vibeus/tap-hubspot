@@ -836,15 +836,16 @@ def sync_form_submissions(STATE, ctx, form_guids):
     more_key = 'after'
     offset_keys = ['after']
     offset_targets = ['after']
-    STATE = singer.clear_offset(STATE, FORM_SUBMISSIONS) # do not use previous offset since multiple submissions for multiple forms are synced
-    singer.write_state(STATE)
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for form_guid in form_guids:
             LOGGER.info("sync_form_submissions for %s from %s", FORMS_TO_GET_SUBMISSIONS[form_guid], start)
             url = get_url(FORM_SUBMISSIONS, form_guid=form_guid)
+            STATE = singer.clear_offset(STATE, FORM_SUBMISSIONS) # do not use previous offset since multiple submissions for multiple forms are synced
+            singer.write_state(STATE)
 
-            for row in gen_request(STATE, FORM_SUBMISSIONS, url, default_form_submissions_params, path, more_key, offset_keys, offset_targets, process_data=process_response):
+            # use default_form_submissions_params.copy() ! gen_request will modify the params argument
+            for row in gen_request(STATE, FORM_SUBMISSIONS, url, default_form_submissions_params.copy(), path, more_key, offset_keys, offset_targets, process_data=process_response):
                 submitted_time = None
                 if bookmark_key in row:
                     submitted_time = utils.strptime_with_tz(
@@ -859,6 +860,9 @@ def sync_form_submissions(STATE, ctx, form_guids):
 
                 if submitted_time and submitted_time >= max_bk_value:
                     max_bk_value = submitted_time
+
+            STATE = singer.clear_offset(STATE, FORM_SUBMISSIONS) # do not use previous offset since multiple submissions for multiple forms are synced
+            singer.write_state(STATE)
 
     new_bookmark = min(max_bk_value, current_sync_start)
     STATE = singer.write_bookmark(STATE, FORM_SUBMISSIONS, bookmark_key, utils.strftime(new_bookmark))
