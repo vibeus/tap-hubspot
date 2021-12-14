@@ -95,6 +95,13 @@ ENV/
 # Custom stuff
 env.sh
 config.json
+catalog.json
+catalog.sample.json
+target-postgres.json
+state.json
+*.txt
 .autoenv.zsh
+.autoenv_leave.zsh
+tidy-schema
 *~
 env-vars*

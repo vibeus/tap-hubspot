@@ -41,6 +41,13 @@ class StateFields:
 BASE_URL = "https://api.hubapi.com"
 
 CONTACTS_BY_COMPANY = "contacts_by_company"
+FORM_SUBMISSIONS = "form_submissions"
+
+FORMS_TO_GET_SUBMISSIONS = {
+    '3d3eac66-7345-4825-a6e8-df8d0575832e': 'warranty form',
+    '08888baf-0e69-430f-a9cb-61e69e4792de': 'rma form',
+    '24b978db-2c9e-41ce-af2b-24441807ee5b': 'ticket form'
+}
 
 DEFAULT_CHUNK_SIZE = 1000 * 60 * 60 * 24
 
@@ -89,10 +96,12 @@ ENDPOINTS = {
 
     "engagements_all":        "/engagements/v1/engagements/paged",
 
+    "forms":                "/forms/v2/forms",
+    "form_submissions":     "/form-integrations/v1/submissions/forms/{form_guid}",
+
     "subscription_changes": "/email/public/v1/subscriptions/timeline",
     "email_events":         "/email/public/v1/events",
     "contact_lists":        "/contacts/v1/lists",
-    "forms":                "/forms/v2/forms",
     "workflows":            "/automation/v3/workflows",
     "owners":               "/owners/v2/owners",
 }
@@ -411,7 +420,7 @@ def get_v3_deals(v3_fields, v1_data):
     return v3_resp.json()['results']
 
 #pylint: disable=line-too-long
-def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, offset_targets, v3_fields=None):
+def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, offset_targets, v3_fields=None, process_data=None):
     if len(offset_keys) != len(offset_targets):
         raise ValueError("Number of offset_keys must match number of offset_targets")
 
@@ -424,6 +433,9 @@ def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, 
 
             if data.get(path) is None:
                 raise RuntimeError("Unexpected API response: {} not in {}".format(path, data.keys()))
+
+            if process_data:
+                data = process_data(data)
 
             if v3_fields:
                 v3_data = get_v3_deals(v3_fields, data[path])
@@ -795,6 +807,66 @@ def sync_contact_lists(STATE, ctx):
 
     return STATE
 
+default_form_submissions_params = {'limit': 50}
+
+def sync_form_submissions(STATE, ctx, form_guids):
+    def process_response(res):
+        after = res.get('paging', {}).get('next', {}).get('after', {})
+        if after:
+            res['after'] = after
+        return res
+
+    if len(form_guids) == 0:
+        return STATE
+
+    catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
+    mdata = metadata.to_map(catalog.get('metadata'))
+    schema = load_schema(FORM_SUBMISSIONS)
+
+    singer.write_schema(FORM_SUBMISSIONS, schema, [])
+
+    bookmark_key = 'submittedAt'
+    current_sync_start = get_current_sync_start(STATE, FORM_SUBMISSIONS) or utils.now()
+    start = utils.strptime_to_utc(get_start(STATE, FORM_SUBMISSIONS, bookmark_key))
+    max_bk_value = start
+
+
+    # request realted
+    path = 'results'
+    more_key = 'after'
+    offset_keys = ['after']
+    offset_targets = ['after']
+    STATE = singer.clear_offset(STATE, FORM_SUBMISSIONS) # do not use previous offset since multiple submissions for multiple forms are synced
+    singer.write_state(STATE)
+
+    with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
+        for form_guid in form_guids:
+            LOGGER.info("sync_form_submissions for %s from %s", FORMS_TO_GET_SUBMISSIONS[form_guid], start)
+            url = get_url(FORM_SUBMISSIONS, form_guid=form_guid)
+
+            for row in gen_request(STATE, FORM_SUBMISSIONS, url, default_form_submissions_params, path, more_key, offset_keys, offset_targets, process_data=process_response):
+                submitted_time = None
+                if bookmark_key in row:
+                    submitted_time = utils.strptime_with_tz(
+                        _transform_datetime(  # pylint: disable=protected-access
+                            row[bookmark_key],
+                            UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING))
+
+                if not submitted_time or submitted_time >= start:
+                    row['formGuid'] = form_guid
+                    record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+                    singer.write_record(FORM_SUBMISSIONS, record, catalog.get('stream_alias'), time_extracted=utils.now())
+
+                if submitted_time and submitted_time >= max_bk_value:
+                    max_bk_value = submitted_time
+
+    new_bookmark = min(max_bk_value, current_sync_start)
+    STATE = singer.write_bookmark(STATE, FORM_SUBMISSIONS, bookmark_key, utils.strftime(new_bookmark))
+    STATE = write_current_sync_start(STATE, FORM_SUBMISSIONS, None)
+    singer.write_state(STATE)
+
+    return STATE
+
 def sync_forms(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
     mdata = metadata.to_map(catalog.get('metadata'))
@@ -802,7 +874,7 @@ def sync_forms(STATE, ctx):
     bookmark_key = 'updatedAt'
 
     singer.write_schema("forms", schema, ["guid"], [bookmark_key], catalog.get('stream_alias'))
-    start = get_start(STATE, "forms", bookmark_key)
+    start = utils.strptime_to_utc(get_start(STATE, "forms", bookmark_key))
     max_bk_value = start
 
     LOGGER.info("sync_forms from %s", start)
@@ -810,17 +882,32 @@ def sync_forms(STATE, ctx):
     data = request(get_url("forms")).json()
     time_extracted = utils.now()
 
+    form_submissions_guids = []
+
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for row in data:
             record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
 
-            if record[bookmark_key] >= start:
-                singer.write_record("forms", record, catalog.get('stream_alias'), time_extracted=time_extracted)
-            if record[bookmark_key] >= max_bk_value:
-                max_bk_value = record[bookmark_key]
+            modified_time = utils.strptime_with_tz(
+                    _transform_datetime(  # pylint: disable=protected-access
+                        record[bookmark_key],
+                        UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING))
 
-    STATE = singer.write_bookmark(STATE, 'forms', bookmark_key, max_bk_value)
+            if modified_time >= start:
+                singer.write_record("forms", record, catalog.get('stream_alias'), time_extracted=time_extracted)
+            if modified_time >= max_bk_value:
+                max_bk_value = modified_time
+
+            form_guid = record['guid']
+            if FORM_SUBMISSIONS in ctx.selected_stream_ids and form_guid in FORMS_TO_GET_SUBMISSIONS:
+                form_submissions_guids.append(form_guid)
+
+    STATE = singer.write_bookmark(STATE, 'forms', bookmark_key, utils.strftime(max_bk_value))
     singer.write_state(STATE)
+
+    if FORM_SUBMISSIONS in ctx.selected_stream_ids:
+        STATE = singer.set_currently_syncing(STATE, FORM_SUBMISSIONS)
+        STATE = sync_form_submissions(STATE, ctx, form_submissions_guids)
 
     return STATE
 
