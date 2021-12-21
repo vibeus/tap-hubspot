@@ -43,6 +43,8 @@ BASE_URL = "https://api.hubapi.com"
 CONTACTS_BY_COMPANY = "contacts_by_company"
 FORM_SUBMISSIONS = "form_submissions"
 
+CUSTOM_SCHEMA_WITHOUT_EXTRAS = ['contacts', 'tickets', 'feedback_submissions']
+
 FORMS_TO_GET_SUBMISSIONS = {
     '3d3eac66-7345-4825-a6e8-df8d0575832e': 'warranty form',
     '08888baf-0e69-430f-a9cb-61e69e4792de': 'rma form',
@@ -70,40 +72,45 @@ CONFIG = {
 }
 
 ENDPOINTS = {
-    "contacts_properties":  "/properties/v1/contacts/properties",
-    "contacts_all":         "/contacts/v1/lists/all/contacts/all",
-    "contacts_recent":      "/contacts/v1/lists/recently_updated/contacts/recent",
-    "contacts_detail":      "/contacts/v1/contact/vids/batch/",
+    "contacts_properties":          "/properties/v1/contacts/properties",
+    "contacts_all":                 "/contacts/v1/lists/all/contacts/all",
+    "contacts_recent":              "/contacts/v1/lists/recently_updated/contacts/recent",
+    "contacts_detail":              "/contacts/v1/contact/vids/batch/",
 
-    "companies_properties": "/companies/v2/properties",
-    "companies_all":        "/companies/v2/companies/paged",
-    "companies_recent":     "/companies/v2/companies/recent/modified",
-    "companies_detail":     "/companies/v2/companies/{company_id}",
-    "contacts_by_company":  "/companies/v2/companies/{company_id}/vids",
+    "companies_properties":         "/companies/v2/properties",
+    "companies_all":                "/companies/v2/companies/paged",
+    "companies_recent":             "/companies/v2/companies/recent/modified",
+    "companies_detail":             "/companies/v2/companies/{company_id}",
+    "contacts_by_company":          "/companies/v2/companies/{company_id}/vids",
 
-    "deals_properties":     "/properties/v1/deals/properties",
-    "deals_all":            "/deals/v1/deal/paged",
-    "deals_recent":         "/deals/v1/deal/recent/modified",
-    "deals_detail":         "/deals/v1/deal/{deal_id}",
+    "deals_properties":             "/properties/v1/deals/properties",
+    "deals_all":                    "/deals/v1/deal/paged",
+    "deals_recent":                 "/deals/v1/deal/recent/modified",
+    "deals_detail":                 "/deals/v1/deal/{deal_id}",
 
-    "deals_v3_batch_read":  "/crm/v3/objects/deals/batch/read",
-    "deals_v3_properties":  "/crm/v3/properties/deals",
+    "deals_v3_batch_read":          "/crm/v3/objects/deals/batch/read",
+    "deals_v3_properties":          "/crm/v3/properties/deals",
 
-    "deal_pipelines":       "/deals/v1/pipelines",
+    "deal_pipelines":               "/deals/v1/pipelines",
 
-    "campaigns_all":        "/email/public/v1/campaigns/by-id",
-    "campaigns_detail":     "/email/public/v1/campaigns/{campaign_id}",
+    "campaigns_all":                "/email/public/v1/campaigns/by-id",
+    "campaigns_detail":             "/email/public/v1/campaigns/{campaign_id}",
 
-    "engagements_all":        "/engagements/v1/engagements/paged",
+    "engagements_all":              "/engagements/v1/engagements/paged",
 
-    "forms":                "/forms/v2/forms",
-    "form_submissions":     "/form-integrations/v1/submissions/forms/{form_guid}",
+    "forms":                        "/forms/v2/forms",
+    "form_submissions":             "/form-integrations/v1/submissions/forms/{form_guid}",
 
-    "subscription_changes": "/email/public/v1/subscriptions/timeline",
-    "email_events":         "/email/public/v1/events",
-    "contact_lists":        "/contacts/v1/lists",
-    "workflows":            "/automation/v3/workflows",
-    "owners":               "/owners/v2/owners",
+    "v3_list_all":                  "/crm/v3/objects/{objectType}",
+    "v3_batch_read":                "/crm/v3/objects/{objectType}/batch/read",
+    "v3_properties":                "/crm/v3/properties/{objectType}",
+    "v3_associations_batch_read":   "/crm/v3/associations/{fromObjectType}/{toObjectType}/batch/read",
+
+    "subscription_changes":         "/email/public/v1/subscriptions/timeline",
+    "email_events":                 "/email/public/v1/events",
+    "contact_lists":                "/contacts/v1/lists",
+    "workflows":                    "/automation/v3/workflows",
+    "owners":                       "/owners/v2/owners",
 }
 
 def replace_na(obj):
@@ -192,18 +199,15 @@ def get_field_schema(field_type, extras=False):
         }
 
 def parse_custom_schema(entity_name, data):
+    extras = not entity_name in CUSTOM_SCHEMA_WITHOUT_EXTRAS
     return {
-        field['name']: get_field_schema(field['type'], entity_name != 'contacts')
+        field['name']: get_field_schema(field['type'], extras)
         for field in data
     }
 
 
 def get_custom_schema(entity_name):
     return parse_custom_schema(entity_name, request(get_url(entity_name + "_properties")).json())
-
-def get_v3_schema(entity_name):
-    url = get_url("deals_v3_properties")
-    return parse_custom_schema(entity_name, request(url).json()['results'])
 
 def get_abs_path(path):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), path)
@@ -217,8 +221,11 @@ def load_associated_company_schema():
 
 def load_schema(entity_name):
     schema = utils.load_json(get_abs_path('schemas/{}.json'.format(entity_name)))
-    if entity_name in ["contacts", "companies", "deals"]:
-        custom_schema = get_custom_schema(entity_name)
+    if entity_name in ["contacts", "companies", "deals", "tickets", "feedback_submissions"]:
+        if entity_name in ["contacts", "companies", "deals"]:
+            custom_schema = get_custom_schema(entity_name)
+        elif entity_name in ["tickets", "feedback_submissions"]:
+            custom_schema = get_v3_schema(entity_name)
 
         schema['properties']['properties'] = {
             "type": "object",
@@ -338,19 +345,12 @@ def request(url, params=None):
             resp.raise_for_status()
 
     return resp
-# {"bookmarks" : {"contacts" : { "lastmodifieddate" : "2001-01-01"
-#                                "offset" : {"vidOffset": 1234
-#                                           "timeOffset": "3434434 }}
-#                 "users" : { "timestamp" : "2001-01-01"}}
-#  "currently_syncing" : "contacts"
-# }
-# }
 
-def lift_properties_and_versions(record):
+def lift_properties_and_versions(record, include_versions=True):
     record = replace_na(record)
     for key, value in record.get('properties', {}).items():
         computed_key = "property_{}".format(key)
-        versions = value.get('versions')
+        versions = value.get('versions') if include_versions else None
         record[computed_key] = value
 
         if versions:
@@ -418,6 +418,115 @@ def get_v3_deals(v3_fields, v1_data):
     v3_url = get_url('deals_v3_batch_read')
     v3_resp = post_search_endpoint(v3_url, v3_body)
     return v3_resp.json()['results']
+
+# v3 related
+def process_v3_paging(res):
+    after = res.get('paging', {}).get('next', {}).get('after', {})
+    if after:
+        res['after'] = after
+    return res
+
+v3_request_kwargs = {
+    'path': 'results',
+    'more_key': 'after',
+    'offset_keys': ['after'],
+    'offset_targets': ['after'],
+    'process_data': process_v3_paging
+}
+
+v3_request_params = {
+    'limit': 100
+}
+
+def _sync_object_ids(stream_id, catalog, ids, schema, bumble_bee, associated_type='contact', associated_key='associated-vids'):
+    if len(ids) == 0:
+        return
+
+    mdata = metadata.to_map(catalog.get('metadata'))
+    data = process_v3_records(post_v3_batch_read(get_url('v3_batch_read', objectType=stream_id), ids, mdata))
+    associations = post_v3_associations(stream_id, associated_type, ids)
+    time_extracted = utils.now()
+
+    for record in data:
+        vids = associations.get(record['id'], None)
+        if vids:
+            record[associated_key] = vids
+        record = bumble_bee.transform(lift_properties_and_versions(record, include_versions=False), schema, mdata)
+        singer.write_record(stream_id, record, catalog.get('stream_alias'), time_extracted=time_extracted)
+
+def sync_v3_objects(STATE, ctx, bookmark_key='updatedAt'):
+    stream_id = singer.get_currently_syncing(STATE)
+    catalog = ctx.get_catalog_from_id(stream_id)
+    mdata = metadata.to_map(catalog.get('metadata'))
+    start = utils.strptime_with_tz(get_start(STATE, stream_id, bookmark_key))
+    max_bk_value = start
+    LOGGER.info("sync_%s from %s", stream_id, start)
+
+    schema = load_schema(stream_id)
+    singer.write_schema(stream_id, schema, ['id'], [bookmark_key], catalog.get('stream_alias'))
+
+    url = get_url('v3_list_all', objectType=stream_id)
+
+    ids = []
+    with Transformer() as bumble_bee:
+        for row in gen_request(STATE, stream_id, url, v3_request_params, **v3_request_kwargs):
+            modified_time = None
+            if bookmark_key in row:
+                modified_time = utils.strptime_with_tz(
+                    _transform_datetime( # pylint: disable=protected-access
+                        row[bookmark_key]))
+
+            if not modified_time or modified_time >= start:
+                ids.append(row['id'])
+
+            if modified_time and modified_time >= max_bk_value:
+                max_bk_value = modified_time
+
+            if len(ids) == 100:
+                _sync_object_ids(stream_id, catalog, ids, schema, bumble_bee)
+                ids = []
+
+        _sync_object_ids(stream_id, catalog, ids, schema, bumble_bee)
+
+    STATE = singer.write_bookmark(STATE, stream_id, bookmark_key, utils.strftime(max_bk_value))
+    singer.write_state(STATE)
+    return STATE
+
+def get_v3_schema(entity_name):
+    url = get_url("v3_properties", objectType=entity_name)
+    return parse_custom_schema(entity_name, request(url).json()['results'])
+
+def post_v3_batch_read(url, ids, mdata):
+    inputs = [{ 'id': id } for id in ids]
+    has_selected_properties = mdata.get(('properties', 'properties'), {}).get('selected')
+    properties = [breadcrumb[1].replace('property_', '')
+                  for breadcrumb, mdata_map in mdata.items()
+                  if breadcrumb
+                  and (mdata_map.get('selected') == True or has_selected_properties)]
+    body = {
+        'inputs': inputs,
+        'properties': properties
+    }
+    resp = post_search_endpoint(url, body)
+    return resp.json()['results']
+
+def post_v3_associations(fromObjectType, toObjectType, ids):
+    url = get_url("v3_associations_batch_read", fromObjectType=fromObjectType, toObjectType=toObjectType)
+    inputs = [{ 'id': id } for id in ids]
+    body = { 'inputs': inputs }
+    resp = post_search_endpoint(url, body)
+    results = resp.json()['results']
+    from_ids = [pair['from']['id'] for pair in results]
+    to_ids = [[to['id'] for to in pair['to']] for pair in results]
+    return dict(zip(from_ids, to_ids))
+
+def process_v3_records(v3_data):
+    transformed_v3_data = []
+    for record in v3_data:
+        new_properties = {field_name : {'value': field_value}
+                          for field_name, field_value in record['properties'].items()}
+        transformed_v3_data.append({**record, 'properties' : new_properties})
+    return transformed_v3_data
 
 #pylint: disable=line-too-long
 def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, offset_targets, v3_fields=None, process_data=None):
@@ -810,12 +919,6 @@ def sync_contact_lists(STATE, ctx):
 default_form_submissions_params = {'limit': 50}
 
 def sync_form_submissions(STATE, ctx, form_guids):
-    def process_response(res):
-        after = res.get('paging', {}).get('next', {}).get('after', {})
-        if after:
-            res['after'] = after
-        return res
-
     if len(form_guids) == 0:
         return STATE
 
@@ -830,13 +933,6 @@ def sync_form_submissions(STATE, ctx, form_guids):
     start = utils.strptime_to_utc(get_start(STATE, FORM_SUBMISSIONS, bookmark_key))
     max_bk_value = start
 
-
-    # request realted
-    path = 'results'
-    more_key = 'after'
-    offset_keys = ['after']
-    offset_targets = ['after']
-
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for form_guid in form_guids:
             LOGGER.info("sync_form_submissions for %s from %s", FORMS_TO_GET_SUBMISSIONS[form_guid], start)
@@ -845,7 +941,7 @@ def sync_form_submissions(STATE, ctx, form_guids):
             singer.write_state(STATE)
 
             # use default_form_submissions_params.copy() ! gen_request will modify the params argument
-            for row in gen_request(STATE, FORM_SUBMISSIONS, url, default_form_submissions_params.copy(), path, more_key, offset_keys, offset_targets, process_data=process_response):
+            for row in gen_request(STATE, FORM_SUBMISSIONS, url, default_form_submissions_params.copy(), **v3_request_kwargs):
                 submitted_time = None
                 if bookmark_key in row:
                     submitted_time = utils.strptime_with_tz(
@@ -1038,7 +1134,6 @@ def sync_deal_pipelines(STATE, ctx):
             singer.write_record("deal_pipelines", record, catalog.get('stream_alias'), time_extracted=utils.now())
     singer.write_state(STATE)
     return STATE
-
 @attr.s
 class Stream(object):
     tap_stream_id = attr.ib()
@@ -1062,7 +1157,9 @@ STREAMS = [
     Stream('companies', sync_companies, ["companyId"], 'hs_lastmodifieddate', 'FULL_TABLE'),
     Stream('deals', sync_deals, ["dealId"], 'hs_lastmodifieddate', 'FULL_TABLE'),
     Stream('deal_pipelines', sync_deal_pipelines, ['pipelineId'], None, 'FULL_TABLE'),
-    Stream('engagements', sync_engagements, ["engagement_id"], 'lastUpdated', 'FULL_TABLE')
+    Stream('engagements', sync_engagements, ["engagement_id"], 'lastUpdated', 'FULL_TABLE'),
+    Stream('tickets', sync_v3_objects, ['id'], 'updatedAt', 'FULL_TABLE'),
+    Stream('feedback_submissions', sync_v3_objects, ['id'], 'updatedAt', 'FULL_TABLE')
 ]
 
 def get_streams_to_sync(streams, state):
@@ -1189,7 +1286,7 @@ def discover_schemas():
 
 def do_discover():
     LOGGER.info('Loading schemas')
-    json.dump(discover_schemas(), sys.stdout, indent=4)
+    json.dump(discover_schemas(), sys.stdout, indent=2)
 
 def main_impl():
     args = utils.parse_args(
