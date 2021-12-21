@@ -930,11 +930,14 @@ def sync_form_submissions(STATE, ctx, form_guids):
 
     bookmark_key = 'submittedAt'
     current_sync_start = get_current_sync_start(STATE, FORM_SUBMISSIONS) or utils.now()
-    start = utils.strptime_to_utc(get_start(STATE, FORM_SUBMISSIONS, bookmark_key))
-    max_bk_value = start
+    STATE = write_current_sync_start(STATE, FORM_SUBMISSIONS, current_sync_start)
 
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
         for form_guid in form_guids:
+            sub_stream_id = '{}_{}'.format(FORM_SUBMISSIONS, form_guid)
+            start = utils.strptime_to_utc(get_start(STATE, sub_stream_id, bookmark_key))
+            max_bk_value = start
+
             LOGGER.info("sync_form_submissions for %s from %s", FORMS_TO_GET_SUBMISSIONS[form_guid], start)
             url = get_url(FORM_SUBMISSIONS, form_guid=form_guid)
             STATE = singer.clear_offset(STATE, FORM_SUBMISSIONS) # do not use previous offset since multiple submissions for multiple forms are synced
@@ -958,10 +961,10 @@ def sync_form_submissions(STATE, ctx, form_guids):
                     max_bk_value = submitted_time
 
             STATE = singer.clear_offset(STATE, FORM_SUBMISSIONS) # do not use previous offset since multiple submissions for multiple forms are synced
+            new_bookmark = min(max_bk_value, current_sync_start)
+            STATE = singer.write_bookmark(STATE, sub_stream_id, bookmark_key, utils.strftime(new_bookmark))
             singer.write_state(STATE)
 
-    new_bookmark = min(max_bk_value, current_sync_start)
-    STATE = singer.write_bookmark(STATE, FORM_SUBMISSIONS, bookmark_key, utils.strftime(new_bookmark))
     STATE = write_current_sync_start(STATE, FORM_SUBMISSIONS, None)
     singer.write_state(STATE)
 
