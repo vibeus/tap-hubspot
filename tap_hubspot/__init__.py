@@ -51,6 +51,8 @@ FORMS_TO_GET_SUBMISSIONS = {
     '24b978db-2c9e-41ce-af2b-24441807ee5b': 'ticket form'
 }
 
+EMAIL_EVENT_TYPES = ['OPEN', 'CLICK', 'FORWARD', 'SPAMREPORT']
+
 DEFAULT_CHUNK_SIZE = 1000 * 60 * 60 * 24
 
 V3_PREFIXES = {'hs_date_entered', 'hs_date_exited', 'hs_time_in'}
@@ -838,37 +840,44 @@ def sync_entity_chunked(STATE, catalog, entity_name, key_properties, path):
     with metrics.record_counter(entity_name) as counter:
         while start_ts < now_ts:
             end_ts = start_ts + window_size
-            params = {
+            default_params = {
                 'startTimestamp': start_ts,
                 'endTimestamp': end_ts,
                 'limit': 1000,
             }
             with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
-                while True:
-                    our_offset = singer.get_offset(STATE, entity_name)
-                    if bool(our_offset) and our_offset.get('offset') != None:
-                        params[StateFields.offset] = our_offset.get('offset')
+                for eventType in EMAIL_EVENT_TYPES:
+                    STATE = singer.clear_offset(STATE, entity_name)
+                    singer.write_state(STATE)
+                    while True:
+                        params = default_params.copy()
 
-                    data = request(url, params).json()
-                    time_extracted = utils.now()
+                        our_offset = singer.get_offset(STATE, entity_name)
+                        if bool(our_offset) and our_offset.get('offset') != None:
+                            params[StateFields.offset] = our_offset.get('offset')
 
-                    if data.get(path) is None:
-                        raise RuntimeError("Unexpected API response: {} not in {}".format(path, data.keys()))
+                        params['eventType'] = eventType
 
-                    for row in data[path]:
-                        counter.increment()
-                        record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
-                        singer.write_record(entity_name,
-                                            record,
-                                            catalog.get('stream_alias'),
-                                            time_extracted=time_extracted)
-                    if data.get('hasMore'):
-                        STATE = singer.set_offset(STATE, entity_name, 'offset', data['offset'])
-                        singer.write_state(STATE)
-                    else:
-                        STATE = singer.clear_offset(STATE, entity_name)
-                        singer.write_state(STATE)
-                        break
+                        data = request(url, params).json()
+                        time_extracted = utils.now()
+
+                        if data.get(path) is None:
+                            raise RuntimeError("Unexpected API response: {} not in {}".format(path, data.keys()))
+
+                        for row in data[path]:
+                            counter.increment()
+                            record = bumble_bee.transform(lift_properties_and_versions(row), schema, mdata)
+                            singer.write_record(entity_name,
+                                                record,
+                                                catalog.get('stream_alias'),
+                                                time_extracted=time_extracted)
+                        if data.get('hasMore'):
+                            STATE = singer.set_offset(STATE, entity_name, 'offset', data['offset'])
+                            singer.write_state(STATE)
+                        else:
+                            STATE = singer.clear_offset(STATE, entity_name)
+                            singer.write_state(STATE)
+                            break
             STATE = singer.write_bookmark(STATE, entity_name, 'startTimestamp', utils.strftime(datetime.datetime.fromtimestamp((start_ts / 1000), datetime.timezone.utc ))) # pylint: disable=line-too-long
             singer.write_state(STATE)
             start_ts = end_ts
