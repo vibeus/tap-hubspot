@@ -96,7 +96,7 @@ ENV/
 env.sh
 config.json
 catalog.json
-catalog.sample.json
+catalog.*.json
 target-postgres.json
 state.json
 *.txt
