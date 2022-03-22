@@ -494,6 +494,50 @@ def sync_v3_objects(STATE, ctx, bookmark_key='updatedAt'):
     singer.write_state(STATE)
     return STATE
 
+def sync_v3_tickets_archived(STATE, ctx, bookmark_key='archivedAt'):
+    stream_id = singer.get_currently_syncing(STATE)
+    catalog = ctx.get_catalog_from_id(stream_id)
+    mdata = metadata.to_map(catalog.get('metadata'))
+    start = utils.strptime_with_tz(get_start(STATE, stream_id, bookmark_key))
+    max_bk_value = start
+    LOGGER.info("sync_%s from %s", stream_id, start)
+
+    schema = load_schema(stream_id)
+    singer.write_schema(stream_id, schema, ['id'], [bookmark_key], catalog.get('stream_alias'))
+
+    url = get_url('v3_list_all', objectType="tickets")
+    params = {'limit': 100, 'archived': True}
+
+    with Transformer() as bumble_bee:
+        for row in gen_request(STATE, stream_id, url, params, **v3_request_kwargs):
+            record = {}
+            modified_time = None
+            if bookmark_key in row:
+                modified_time = utils.strptime_with_tz(
+                    _transform_datetime( # pylint: disable=protected-access
+                        row[bookmark_key]))
+
+            if not modified_time or modified_time >= start:
+                record['id'] = row['id']
+                record['createdAt'] = row['createdAt']
+                record['updatedAt'] = row['updatedAt']
+                record['archived'] = row['archived']
+                record['archivedAt'] = row['archivedAt']
+                record['subject'] = row['properties']['subject']
+                record['content'] = row['properties']['content']
+                record['hs_lastmodifieddate'] = row['properties']['hs_lastmodifieddate']
+                record['hs_pipeline_stage'] = row['properties']['hs_pipeline_stage']
+                record = replace_na(record)
+                record = bumble_bee.transform(record, schema, mdata)
+                singer.write_record(stream_id, record, catalog.get('stream_alias'), time_extracted=utils.now())
+
+            if modified_time and modified_time >= max_bk_value:
+                max_bk_value = modified_time
+
+    STATE = singer.write_bookmark(STATE, stream_id, bookmark_key, utils.strftime(max_bk_value))
+    singer.write_state(STATE)
+    return STATE
+
 def get_v3_schema(entity_name):
     url = get_url("v3_properties", objectType=entity_name)
     return parse_custom_schema(entity_name, request(url).json()['results'])
@@ -1171,7 +1215,8 @@ STREAMS = [
     Stream('deal_pipelines', sync_deal_pipelines, ['pipelineId'], None, 'FULL_TABLE'),
     Stream('engagements', sync_engagements, ["engagement_id"], 'lastUpdated', 'FULL_TABLE'),
     Stream('tickets', sync_v3_objects, ['id'], 'updatedAt', 'FULL_TABLE'),
-    Stream('feedback_submissions', sync_v3_objects, ['id'], 'updatedAt', 'FULL_TABLE')
+    Stream('feedback_submissions', sync_v3_objects, ['id'], 'updatedAt', 'FULL_TABLE'),
+    Stream('tickets_archived', sync_v3_tickets_archived, ['id'], 'archivedAt', 'FULL_TABLE')
 ]
 
 def get_streams_to_sync(streams, state):
