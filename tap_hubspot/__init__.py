@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import json
+import time
 
 import attr
 import backoff
@@ -21,6 +22,7 @@ from singer import (transform,
 
 LOGGER = singer.get_logger()
 SESSION = requests.Session()
+BACKOFF_SECONDS = 60
 
 class InvalidAuthException(Exception):
     pass
@@ -107,6 +109,9 @@ ENDPOINTS = {
     "v3_batch_read":                "/crm/v3/objects/{objectType}/batch/read",
     "v3_properties":                "/crm/v3/properties/{objectType}",
     "v3_associations_batch_read":   "/crm/v3/associations/{fromObjectType}/{toObjectType}/batch/read",
+
+    "v3_conversations":             "/conversations/v3/conversations/threads",
+    "v3_conversations_messages":    "/conversations/v3/conversations/threads/{thread_id}/messages",
 
     "subscription_changes":         "/email/public/v1/subscriptions/timeline",
     "email_events":                 "/email/public/v1/events",
@@ -494,22 +499,23 @@ def sync_v3_objects(STATE, ctx, bookmark_key='updatedAt'):
     singer.write_state(STATE)
     return STATE
 
-def sync_v3_tickets_archived(STATE, ctx, bookmark_key='archivedAt'):
+def sync_v3_tickets_archived(STATE, ctx):
     stream_id = singer.get_currently_syncing(STATE)
-    catalog = ctx.get_catalog_from_id(stream_id)
+    catalog = ctx.get_catalog_from_id('tickets_archived')
     mdata = metadata.to_map(catalog.get('metadata'))
-    start = utils.strptime_with_tz(get_start(STATE, stream_id, bookmark_key))
+    bookmark_key = 'archivedAt'
+    start = utils.strptime_with_tz(get_start(STATE, 'tickets_archived', bookmark_key))
     max_bk_value = start
-    LOGGER.info("sync_%s from %s", stream_id, start)
+    LOGGER.info("sync_%s from %s", 'tickets_archived', start)
 
-    schema = load_schema(stream_id)
-    singer.write_schema(stream_id, schema, ['id'], [bookmark_key], catalog.get('stream_alias'))
+    schema = load_schema('tickets_archived')
+    singer.write_schema('tickets_archived', schema, ['id'], [bookmark_key], catalog.get('stream_alias'))
 
     url = get_url('v3_list_all', objectType="tickets")
     params = {'limit': 100, 'archived': True}
 
     with Transformer() as bumble_bee:
-        for row in gen_request(STATE, stream_id, url, params, **v3_request_kwargs):
+        for row in gen_request(STATE, 'tickets_archived', url, params, **v3_request_kwargs):
             record = {}
             modified_time = None
             if bookmark_key in row:
@@ -529,12 +535,12 @@ def sync_v3_tickets_archived(STATE, ctx, bookmark_key='archivedAt'):
                 record['hs_pipeline_stage'] = row['properties']['hs_pipeline_stage']
                 record = replace_na(record)
                 record = bumble_bee.transform(record, schema, mdata)
-                singer.write_record(stream_id, record, catalog.get('stream_alias'), time_extracted=utils.now())
+                singer.write_record('tickets_archived', record, catalog.get('stream_alias'), time_extracted=utils.now())
 
             if modified_time and modified_time >= max_bk_value:
                 max_bk_value = modified_time
 
-    STATE = singer.write_bookmark(STATE, stream_id, bookmark_key, utils.strftime(max_bk_value))
+    STATE = singer.write_bookmark(STATE, 'tickets_archived', bookmark_key, utils.strftime(max_bk_value))
     singer.write_state(STATE)
     return STATE
 
@@ -574,6 +580,100 @@ def process_v3_records(v3_data):
         transformed_v3_data.append({**record, 'properties' : new_properties})
     return transformed_v3_data
 
+def process_threads_messages(STATE, thread_id):
+    url = get_url('v3_conversations_messages', thread_id=thread_id)
+    messages = []
+    params, headers = {'limit': 100, 'hapikey': CONFIG['hapikey']}, {}
+    req = requests.Request('GET', url, params=params, headers=headers).prepare()
+
+    temp_message_id = ""
+    while True:
+        LOGGER.info("GET %s", req.url)
+        resp = SESSION.send(req)
+        if resp.status_code == 200:
+            resp = json.loads(resp.text)
+            for row in resp['results']:
+                if row['type'] in ("MESSAGE", "COMMENT", "WELCOME_MESSAGE"):
+                    if row['id'] == temp_message_id:
+                        continue
+                    temp_message_id = row['id']
+
+                    row['clientType'] = row['client']['clientType']
+                    if len(row['senders']) > 0:
+                        row['senders'] = row['senders'][0]
+                        LOGGER.info(f"thread: {thread_id},  loading: {row['id']}")
+                        if 'deliveryIdentifier' in row['senders']\
+                                and row['senders']['deliveryIdentifier']['type'] == "HS_EMAIL_ADDRESS":
+                            row['senders']['email'] = row['senders']['deliveryIdentifier']['value']
+                    else:
+                        row['senders'] = {}
+                    messages.append(row)
+                else:
+                    continue
+
+            if 'paging' in resp and ('after' not in params or params['after'] != resp['paging']['next']['after']):
+                params['after'] = resp['paging']['next']['after']
+                req = requests.Request('GET', url, params=params, headers=headers).prepare()
+            else: 
+                break
+        else:
+            LOGGER.warning(f"Response {resp.status_code}. Waiting {BACKOFF_SECONDS} seconds...")
+            time.sleep(BACKOFF_SECONDS)
+            req = requests.Request('GET', url, params=params, headers=headers).prepare()
+
+    return messages
+
+# v3_conversations_params = {
+#     'limit': 100, 
+#     'sort': 'latestMessageTimestamp', 
+#     'latestMessageTimestampAfter': start
+#     }
+def sync_v3_conversations(STATE, ctx):
+    catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
+    mdata = metadata.to_map(catalog.get('metadata'))
+    bookmark_key='latestMessageTimestamp'
+    start = utils.strptime_with_tz(get_start(STATE, 'conversations', bookmark_key))
+    max_bk_value = start
+    LOGGER.info("sync_conversations from %s", start)
+
+    schema = load_schema('conversations')
+    singer.write_schema('conversations', schema, ['id', 'inboxId'], [bookmark_key], catalog.get('stream_alias'))
+
+    url = get_url('v3_conversations')
+    v3_conversations_params = {
+        'limit': 100, 
+        'sort': 'latestMessageTimestamp', 
+        'latestMessageTimestampAfter': start.strftime("%Y-%m-%d")
+        }
+    ids = []
+    with Transformer() as bumble_bee:
+        for row in gen_request(STATE, 'conversations', url, v3_conversations_params, **v3_request_kwargs):
+
+            if row['spam'] == True:
+                continue
+
+            modified_time = None
+            if bookmark_key in row:
+                modified_time = utils.strptime_with_tz(
+                    _transform_datetime( # pylint: disable=protected-access
+                        row[bookmark_key]))
+            if not modified_time or modified_time >= start:
+                record = row
+                record["messages"] = process_threads_messages(STATE, row['id'])
+                LOGGER.info(f"THREAD {row['id']}: MESSAGES PROCESSED")
+
+                record = replace_na(record)
+                record = bumble_bee.transform(record, schema, mdata)
+                singer.write_record('conversations', record, catalog.get('stream_alias'), time_extracted=utils.now())
+
+            if modified_time and modified_time >= max_bk_value:
+                max_bk_value = modified_time
+
+
+    STATE = singer.write_bookmark(STATE, 'conversations', bookmark_key, utils.strftime(max_bk_value))
+    singer.write_state(STATE)
+    return STATE
+
 #pylint: disable=line-too-long
 def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, offset_targets, v3_fields=None, process_data=None):
     if len(offset_keys) != len(offset_targets):
@@ -605,6 +705,9 @@ def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, 
                 yield row
 
             if not data.get(more_key, False):
+                break
+            
+            if more_key in params and params[more_key] == data.get(more_key, False):
                 break
 
             STATE = singer.clear_offset(STATE, tap_stream_id)
@@ -1216,7 +1319,8 @@ STREAMS = [
     Stream('engagements', sync_engagements, ["engagement_id"], 'lastUpdated', 'FULL_TABLE'),
     Stream('tickets', sync_v3_objects, ['id'], 'updatedAt', 'FULL_TABLE'),
     Stream('feedback_submissions', sync_v3_objects, ['id'], 'updatedAt', 'FULL_TABLE'),
-    Stream('tickets_archived', sync_v3_tickets_archived, ['id'], 'archivedAt', 'FULL_TABLE')
+    Stream('tickets_archived', sync_v3_tickets_archived, ['id'], 'archivedAt', 'FULL_TABLE'),
+    Stream('conversations', sync_v3_conversations, ['id', 'inboxId'], 'latestMessageTimestamp', 'FULL_TABLE')
 ]
 
 def get_streams_to_sync(streams, state):
