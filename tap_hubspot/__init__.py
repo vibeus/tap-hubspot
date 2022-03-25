@@ -623,11 +623,6 @@ def process_threads_messages(STATE, thread_id):
 
     return messages
 
-# v3_conversations_params = {
-#     'limit': 100, 
-#     'sort': 'latestMessageTimestamp', 
-#     'latestMessageTimestampAfter': start
-#     }
 def sync_v3_conversations(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
     mdata = metadata.to_map(catalog.get('metadata'))
