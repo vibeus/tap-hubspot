@@ -775,6 +775,46 @@ def sync_contacts(STATE, ctx):
     singer.write_state(STATE)
     return STATE
 
+def sync_contacts_list_memberships(STATE, ctx):
+    catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
+    bookmark_key = 'timestamp'
+    mdata = metadata.to_map(catalog.get('metadata'))
+    start = utils.strptime_with_tz(get_start(STATE, "contacts", bookmark_key))
+    LOGGER.info("sync_contacts_list_memberships from %s", start)
+
+    max_bk_value = start
+    schema = load_schema("contacts_list_memberships")
+
+    singer.write_schema("contacts_list_memberships", schema, ["vid", "static-list-id"], [bookmark_key], catalog.get('stream_alias'))
+
+    url = get_url("contacts_all")
+
+    vids = []
+    with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
+        for row in gen_request(STATE, 'contacts_list_memberships', url, default_contact_params, 'contacts', 'has-more', ['vid-offset'], ['vidOffset']):
+            vid = row['vid']
+            lm = row['list-memberships']
+            for record in lm:
+                modified_time = None
+                if bookmark_key in record:
+                    modified_time = utils.strptime_with_tz(
+                        _transform_datetime( # pylint: disable=protected-access
+                            record[bookmark_key],
+                            UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING))
+
+                if not modified_time or modified_time >= start:
+                    record['vid'] = vid
+                    record = bumble_bee.transform(record, schema, mdata)
+                    singer.write_record('contacts_list_memberships', record, catalog.get('stream_alias'), time_extracted=utils.now())
+
+                if modified_time and modified_time >= max_bk_value:
+                    max_bk_value = modified_time
+
+    STATE = singer.write_bookmark(STATE, 'contacts_list_memberships', bookmark_key, utils.strftime(max_bk_value))
+    singer.write_state(STATE)
+    return STATE
+
+
 class ValidationPredFailed(Exception):
     pass
 
@@ -1301,7 +1341,8 @@ STREAMS = [
     # Do these first as they are incremental
     Stream('subscription_changes', sync_subscription_changes, ['timestamp', 'portalId', 'recipient'], 'startTimestamp', 'INCREMENTAL'),
     Stream('email_events', sync_email_events, ['id'], 'startTimestamp', 'INCREMENTAL'),
-
+    Stream('contacts_list_memberships', sync_contacts_list_memberships, ["vid", "static-list-id"], 'timestamp', 'INCREMENTAL'),
+    
     # Do these last as they are full table
     Stream('forms', sync_forms, ['guid'], 'updatedAt', 'FULL_TABLE'),
     Stream('workflows', sync_workflows, ['id'], 'updatedAt', 'FULL_TABLE'),
