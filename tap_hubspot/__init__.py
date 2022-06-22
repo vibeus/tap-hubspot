@@ -779,7 +779,7 @@ def sync_contacts_list_memberships(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
     bookmark_key = 'timestamp'
     mdata = metadata.to_map(catalog.get('metadata'))
-    start = utils.strptime_with_tz(get_start(STATE, "contacts", bookmark_key))
+    start = utils.strptime_with_tz(get_start(STATE, "contacts_list_memberships", bookmark_key))
     LOGGER.info("sync_contacts_list_memberships from %s", start)
 
     max_bk_value = start
