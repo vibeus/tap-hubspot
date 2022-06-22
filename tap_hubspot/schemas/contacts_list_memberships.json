@@ -1,0 +1,40 @@
+{
+  "type": [
+    "null",
+    "object"
+  ],
+  "properties": {
+    "vid": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "internal-list-id": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+
+    "static-list-id": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "timestamp": {
+      "type": [
+        "null",
+        "string"
+      ],
+      "format": "date-time"
+    },
+    "is-member": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    }
+  }
+}
