@@ -47,12 +47,7 @@ FORM_SUBMISSIONS = "form_submissions"
 
 CUSTOM_SCHEMA_WITHOUT_EXTRAS = ['contacts', 'tickets', 'feedback_submissions']
 
-FORMS_TO_GET_SUBMISSIONS = {
-    '3d3eac66-7345-4825-a6e8-df8d0575832e': 'warranty form',
-    '08888baf-0e69-430f-a9cb-61e69e4792de': 'rma form',
-    '24b978db-2c9e-41ce-af2b-24441807ee5b': 'ticket form', 
-    'f45b21cf-4899-41da-b81f-cb7a86750112': 's1 shipping plan'
-}
+FORMS_TO_GET_SUBMISSIONS = {}
 
 EMAIL_EVENT_TYPES = ['OPEN', 'CLICK', 'FORWARD', 'SPAMREPORT']
 
@@ -1496,6 +1491,7 @@ def main_impl():
 
     CONFIG.update(args.config)
     STATE = {}
+    FORMS_TO_GET_SUBMISSIONS.update(CONFIG["form_to_get_submissions"])
 
     if args.state:
         STATE.update(args.state)
