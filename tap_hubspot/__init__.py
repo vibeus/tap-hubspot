@@ -807,8 +807,8 @@ def sync_contacts_list_memberships(STATE, ctx):
 
     STATE = singer.write_bookmark(STATE, 'contacts_list_memberships', bookmark_key, utils.strftime(max_bk_value))
     singer.write_state(STATE)
+    default_contact_params.pop("vidOffset", None)
     return STATE
-
 
 class ValidationPredFailed(Exception):
     pass
