@@ -45,6 +45,7 @@ BASE_URL = "https://api.hubapi.com"
 CONTACTS_BY_COMPANY = "contacts_by_company"
 FORM_SUBMISSIONS = "form_submissions"
 
+# ['contacts', 'tickets', 'feedback_submissions']
 CUSTOM_SCHEMA_WITHOUT_EXTRAS = ['contacts', 'tickets', 'feedback_submissions']
 
 FORMS_TO_GET_SUBMISSIONS = {}
@@ -203,10 +204,20 @@ def get_field_schema(field_type, extras=False):
 
 def parse_custom_schema(entity_name, data):
     extras = not entity_name in CUSTOM_SCHEMA_WITHOUT_EXTRAS
-    return {
+    temp_schema = {
         field['name']: get_field_schema(field['type'], extras)
         for field in data
     }
+    
+    contacts_specifics = ["objection_reason", "objection_reason_bdr", "is_send_email"]
+    if entity_name == "contacts": 
+        for specific_property in contacts_specifics:
+            temp_schema[specific_property]["properties"].update({
+                "timestamp": get_field_type_schema("datetime"),
+                "sourceId": get_field_type_schema("string"),
+            })
+
+    return temp_schema
 
 
 def get_custom_schema(entity_name):
@@ -360,6 +371,18 @@ def lift_properties_and_versions(record, include_versions=True):
             if not record.get('properties_versions'):
                 record['properties_versions'] = []
             record['properties_versions'] += versions
+    return record
+
+
+def lift_contact_properties_and_versions(record):
+    record = replace_na(record)
+    for key, value in record.get('properties', {}).items():
+        computed_key = "property_{}".format(key)
+        versions = value.get('versions')
+        if versions:
+            recent_version = versions[0]
+            record[computed_key] = recent_version
+
     return record
 
 @backoff.on_exception(backoff.constant,
@@ -717,12 +740,12 @@ def _sync_contact_vids(catalog, vids, schema, bumble_bee):
     if len(vids) == 0:
         return
 
-    data = request(get_url("contacts_detail"), params={'vid': vids, 'showListMemberships' : True, "formSubmissionMode" : "all"}).json()
+    data = request(get_url("contacts_detail"), params={'vid': vids, 'showListMemberships' : False, "formSubmissionMode" : "all", "propertyMode": "value_and_history"}).json()
     time_extracted = utils.now()
     mdata = metadata.to_map(catalog.get('metadata'))
 
     for record in data.values():
-        record = bumble_bee.transform(lift_properties_and_versions(record), schema, mdata)
+        record = bumble_bee.transform(lift_contact_properties_and_versions(record), schema, mdata)
         singer.write_record("contacts", record, catalog.get('stream_alias'), time_extracted=time_extracted)
 
 default_contact_params = {
@@ -738,6 +761,7 @@ def sync_contacts(STATE, ctx):
     LOGGER.info("sync_contacts from %s", start)
 
     max_bk_value = start
+    # schema = catalog.get("schema")
     schema = load_schema("contacts")
 
     singer.write_schema("contacts", schema, ["vid"], [bookmark_key], catalog.get('stream_alias'))
