@@ -323,9 +323,9 @@ def get_params_and_headers(params):
     params = params or {}
     hapikey = CONFIG['hapikey']
     if hapikey is None:
-        if CONFIG['token_expires'] is None or CONFIG['token_expires'] < datetime.datetime.utcnow():
-            acquire_access_token_from_refresh_token()
-        headers = {'Authorization': 'Bearer {}'.format(CONFIG['access_token'])}
+        # if CONFIG['token_expires'] is None or CONFIG['token_expires'] < datetime.datetime.utcnow():
+        #     acquire_access_token_from_refresh_token()
+        headers = {'Authorization': 'Bearer {}'.format(CONFIG['access_token']), 'Content-Type': 'application/json'}
     else:
         params['hapikey'] = hapikey
         headers = {}
@@ -602,7 +602,7 @@ def process_v3_records(v3_data):
 def process_threads_messages(STATE, thread_id):
     url = get_url('v3_conversations_messages', thread_id=thread_id)
     messages = []
-    params, headers = {'limit': 100, 'hapikey': CONFIG['hapikey']}, {}
+    params, headers = {'limit': 100}, {'Authorization': 'Bearer {}'.format(CONFIG['access_token']), 'Content-Type': 'application/json'}
     req = requests.Request('GET', url, params=params, headers=headers).prepare()
 
     temp_message_id = ""
