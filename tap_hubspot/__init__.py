@@ -23,6 +23,7 @@ from singer import (transform,
 LOGGER = singer.get_logger()
 SESSION = requests.Session()
 BACKOFF_SECONDS = 60
+MAX_TRIES = 5
 
 class InvalidAuthException(Exception):
     pass
@@ -604,7 +605,7 @@ def process_threads_messages(STATE, thread_id):
     messages = []
     params, headers = {'limit': 100}, {'Authorization': 'Bearer {}'.format(CONFIG['access_token']), 'Content-Type': 'application/json'}
     req = requests.Request('GET', url, params=params, headers=headers).prepare()
-
+    attempt = 0
     temp_message_id = ""
     while True:
         LOGGER.info("GET %s", req.url)
@@ -635,10 +636,14 @@ def process_threads_messages(STATE, thread_id):
                 req = requests.Request('GET', url, params=params, headers=headers).prepare()
             else: 
                 break
+        elif resp.status_code == 401 or attempt > MAX_TRIES:
+            break
         else:
             LOGGER.warning(f"Response {resp.status_code}. Waiting {BACKOFF_SECONDS} seconds...")
             time.sleep(BACKOFF_SECONDS)
             req = requests.Request('GET', url, params=params, headers=headers).prepare()
+            attempt += 1
+        
 
     return messages
 
