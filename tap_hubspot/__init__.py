@@ -209,13 +209,18 @@ def parse_custom_schema(entity_name, data):
         field['name']: get_field_schema(field['type'], extras)
         for field in data
     }
-    
+
     contacts_specifics = ["objection_reason", "objection_reason_bdr", "is_send_email"]
-    if entity_name == "contacts": 
+    contacts_need_first_record = ["hubspot_owner_id"]
+    if entity_name == "contacts":
         for specific_property in contacts_specifics:
             temp_schema[specific_property]["properties"].update({
                 "timestamp": get_field_type_schema("datetime"),
                 "sourceId": get_field_type_schema("string"),
+            })
+        for specific_property in contacts_need_first_record:
+            temp_schema[specific_property]["properties"].update({
+                "first_value": get_field_type_schema("string")
             })
 
     return temp_schema
@@ -382,6 +387,7 @@ def lift_contact_properties_and_versions(record):
         versions = value.get('versions')
         if versions:
             recent_version = versions[0]
+            recent_version['first_value'] = versions[-1]['value']
             record[computed_key] = recent_version
 
     return record
@@ -634,7 +640,7 @@ def process_threads_messages(STATE, thread_id):
             if 'paging' in resp and ('after' not in params or params['after'] != resp['paging']['next']['after']):
                 params['after'] = resp['paging']['next']['after']
                 req = requests.Request('GET', url, params=params, headers=headers).prepare()
-            else: 
+            else:
                 break
         elif resp.status_code == 401 or attempt > MAX_TRIES:
             break
@@ -643,7 +649,7 @@ def process_threads_messages(STATE, thread_id):
             time.sleep(BACKOFF_SECONDS)
             req = requests.Request('GET', url, params=params, headers=headers).prepare()
             attempt += 1
-        
+
 
     return messages
 
@@ -660,8 +666,8 @@ def sync_v3_conversations(STATE, ctx):
 
     url = get_url('v3_conversations')
     v3_conversations_params = {
-        'limit': 100, 
-        'sort': 'latestMessageTimestamp', 
+        'limit': 100,
+        'sort': 'latestMessageTimestamp',
         'latestMessageTimestampAfter': start.strftime("%Y-%m-%d")
         }
     ids = []
@@ -725,7 +731,7 @@ def gen_request(STATE, tap_stream_id, url, params, path, more_key, offset_keys, 
 
             if not data.get(more_key, False):
                 break
-            
+
             if more_key in params and params[more_key] == data.get(more_key, False):
                 break
 
@@ -1366,7 +1372,7 @@ STREAMS = [
     Stream('subscription_changes', sync_subscription_changes, ['timestamp', 'portalId', 'recipient'], 'startTimestamp', 'INCREMENTAL'),
     Stream('email_events', sync_email_events, ['id'], 'startTimestamp', 'INCREMENTAL'),
     Stream('contacts_list_memberships', sync_contacts_list_memberships, ["vid", "static-list-id"], 'timestamp', 'INCREMENTAL'),
-    
+
     # Do these last as they are full table
     Stream('forms', sync_forms, ['guid'], 'updatedAt', 'FULL_TABLE'),
     Stream('workflows', sync_workflows, ['id'], 'updatedAt', 'FULL_TABLE'),
