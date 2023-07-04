@@ -557,7 +557,7 @@ def sync_v3_tickets_archived(STATE, ctx):
                 record['archivedAt'] = row['archivedAt']
                 record['subject'] = row['properties']['subject']
                 record['content'] = row['properties']['content']
-                record['hs_lastmodifieddate'] = row['properties']['hs_lastmodifieddate']
+                record['hs_lastmodifieddate'] = row['properties']['hs_lastmodifieddate'] if 'hs_lastmodifieddate' in row['properties'] else None
                 record['hs_pipeline_stage'] = row['properties']['hs_pipeline_stage']
                 record = replace_na(record)
                 record = bumble_bee.transform(record, schema, mdata)
@@ -1009,6 +1009,55 @@ def sync_deals(STATE, ctx):
     singer.write_state(STATE)
     return STATE
 
+
+def sync_deal_owner_history(STATE, ctx):
+    catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
+    mdata = metadata.to_map(catalog.get('metadata'))
+    bookmark_key = 'lastupdateddate'
+    start = utils.strptime_with_tz(get_start(STATE, "deal_owner_history", bookmark_key))
+    max_bk_value = start
+    LOGGER.info("sync_deals_owner_history from %s", start)
+    most_recent_modified_time = start
+
+    key_property = 'hubspot_owner_id'
+    params = {'limit': 100,
+              'includeAssociations': False,
+              'propertiesWithHistory' : ['hubspot_owner_id']}
+
+    schema = load_schema("deal_owner_history")
+    singer.write_schema("deal_owner_history", schema, ["dealId", "hubspot_owner_id", "updated_at"], [bookmark_key], catalog.get('stream_alias'))
+
+    url = get_url('deals_all')
+    with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
+        for row in gen_request(STATE, 'deal_owner_history', url, params, 'deals', "hasMore", ["offset"], ["offset"]):
+            row_properties = row['properties']
+            modified_time = None
+            if key_property in row_properties:
+                timestamp_millis = row_properties['hubspot_owner_id']['timestamp'] / 1000.0
+                modified_time = datetime.datetime.fromtimestamp(timestamp_millis, datetime.timezone.utc)
+
+            if modified_time and modified_time >= max_bk_value:
+                max_bk_value = modified_time
+
+            if key_property in row_properties and (not modified_time or modified_time >= start):
+                row = replace_na(row)
+                versions = row['properties'][key_property].get('versions')
+                for v in versions:
+                    value = "No Owner" if v['value'] == "" else v['value']
+                    record = bumble_bee.transform({
+                        'portalId': row['portalId'],
+                        'dealId': row['dealId'],
+                        key_property: value,
+                        'updated_at': v.get('timestamp'),
+                        'sourceId': v.get('sourceId'),
+                        'source': v.get('source'),
+                    }, schema, mdata)
+                    singer.write_record("deal_owner_history", record, catalog.get('stream_alias'), time_extracted=utils.now())
+
+    STATE = singer.write_bookmark(STATE, 'deal_owner_history', bookmark_key, utils.strftime(max_bk_value))
+    singer.write_state(STATE)
+    return STATE
+
 #NB> no suitable bookmark is available: https://developers.hubspot.com/docs/methods/email/get_campaigns_by_id
 def sync_campaigns(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
@@ -1372,6 +1421,7 @@ STREAMS = [
     Stream('subscription_changes', sync_subscription_changes, ['timestamp', 'portalId', 'recipient'], 'startTimestamp', 'INCREMENTAL'),
     Stream('email_events', sync_email_events, ['id'], 'startTimestamp', 'INCREMENTAL'),
     Stream('contacts_list_memberships', sync_contacts_list_memberships, ["vid", "static-list-id"], 'timestamp', 'INCREMENTAL'),
+    Stream('deal_owner_history', sync_deal_owner_history, ["dealId", "hubspot_owner_id", "updated_at"], 'lastupdateddate', 'INCREMENTAL'),
 
     # Do these last as they are full table
     Stream('forms', sync_forms, ['guid'], 'updatedAt', 'FULL_TABLE'),

@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "properties": {
+    "portalId": {
+      "type": ["null", "integer"]
+    },
+    "dealId": {
+      "type": ["null", "integer"]
+    },
+    "hubspot_owner_id": {
+      "type": ["null", "string"]
+    },
+    "updated_at": {
+      "type": ["null", "string"],
+      "format": "date-time"
+    },
+    "sourceId": {
+      "type": ["null", "string"]
+    },
+    "source": {
+      "type": ["null", "string"]
+    }
+  }
+}
