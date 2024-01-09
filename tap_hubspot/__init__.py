@@ -210,7 +210,7 @@ def parse_custom_schema(entity_name, data):
         for field in data
     }
 
-    contacts_specifics = ["objection_reason", "objection_reason_bdr", "is_send_email", "rh_meeting_status", "property_rh_router_name"]
+    contacts_specifics = ["objection_reason", "objection_reason_bdr", "is_send_email", "rh_meeting_status", "rh_router_name"]
     contacts_need_first_record = ["hubspot_owner_id"]
     if entity_name == "contacts":
         for specific_property in contacts_specifics:
