@@ -938,12 +938,13 @@ def sync_companies(STATE, ctx):
     singer.write_state(STATE)
     return STATE
 
-def has_selected_custom_field(mdata):
+def get_selected_custom_field(mdata):
+    selected_custom_fields = []
     top_level_custom_props = [x for x in mdata if len(x) == 2 and 'property_' in x[1]]
     for prop in top_level_custom_props:
         if mdata.get(prop, {}).get('selected') == True:
-            return True
-    return False
+            selected_custom_fields.append(prop[1])
+    return selected_custom_fields
 
 def sync_deals(STATE, ctx):
     catalog = ctx.get_catalog_from_id(singer.get_currently_syncing(STATE))
@@ -958,7 +959,6 @@ def sync_deals(STATE, ctx):
               'properties' : []}
 
     schema = load_schema("deals")
-    singer.write_schema("deals", schema, ["dealId"], [bookmark_key], catalog.get('stream_alias'))
 
     # Check if we should  include associations
     for key in mdata.keys():
@@ -969,7 +969,8 @@ def sync_deals(STATE, ctx):
 
     v3_fields = None
     has_selected_properties = mdata.get(('properties', 'properties'), {}).get('selected')
-    if has_selected_properties or has_selected_custom_field(mdata):
+    selected_custom_fields = get_selected_custom_field(mdata)
+    if has_selected_properties or len(selected_custom_fields) > 0:
         # On 2/12/20, hubspot added a lot of additional properties for
         # deals, and appending all of them to requests ended up leading to
         # 414 (url-too-long) errors. Hubspot recommended we use the
@@ -984,6 +985,13 @@ def sync_deals(STATE, ctx):
                      if breadcrumb
                      and (mdata_map.get('selected') == True or has_selected_properties)
                      and any(prefix in breadcrumb[1] for prefix in V3_PREFIXES)]
+
+    raw_schema_keys = list(schema['properties'].keys())
+    for prop in raw_schema_keys:
+        if 'property_' in prop and prop not in selected_custom_fields:
+            schema['properties'].pop(prop)
+    singer.write_schema("deals", schema, ["dealId"], [bookmark_key], catalog.get('stream_alias'))
+
 
     url = get_url('deals_all')
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
