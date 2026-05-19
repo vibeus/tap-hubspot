@@ -760,7 +760,7 @@ def _sync_contact_vids(catalog, vids, schema, bumble_bee):
         singer.write_record("contacts", record, catalog.get('stream_alias'), time_extracted=time_extracted)
 
 default_contact_params = {
-    'showListMemberships': True,
+    'showListMemberships': False,
     'includeVersion': True,
     'count': 100,
 }
@@ -777,7 +777,7 @@ def sync_contacts(STATE, ctx):
 
     singer.write_schema("contacts", schema, ["vid"], [bookmark_key], catalog.get('stream_alias'))
 
-    url = get_url("contacts_all")
+    url = get_url("contacts_recent")
 
     vids = []
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
