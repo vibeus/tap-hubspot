@@ -777,7 +777,7 @@ def sync_contacts(STATE, ctx):
 
     singer.write_schema("contacts", schema, ["vid"], [bookmark_key], catalog.get('stream_alias'))
 
-    url = get_url("contacts_all")
+    url = get_url("contacts_recent")
 
     vids = []
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
@@ -817,7 +817,7 @@ def sync_contacts_list_memberships(STATE, ctx):
 
     singer.write_schema("contacts_list_memberships", schema, ["vid", "static-list-id"], [bookmark_key], catalog.get('stream_alias'))
 
-    url = get_url("contacts_recent")
+    url = get_url("contacts_all")
 
     vids = []
     with Transformer(UNIX_MILLISECONDS_INTEGER_DATETIME_PARSING) as bumble_bee:
